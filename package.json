@@ -8,8 +8,11 @@
     "server": "cd server && npm run dev",
     "client": "cd client && npm run dev",
     "build": "cd client && npm run build",
+    "build:server": "cd server && npm install --production",
     "start": "cd server && npm start",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "start:prod": "cd server && NODE_ENV=production npm start",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "deploy": "npm run build && npm run build:server"
   },
   "keywords": ["finance", "upi", "india", "payments"],
   "author": "Spendly Team",
