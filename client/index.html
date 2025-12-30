@@ -8,6 +8,11 @@
     <meta name="keywords" content="personal finance, budget tracker, UPI payments, expense tracker, money management, India" />
     <meta name="author" content="Spendly Team" />
     
+    <!-- UPI Intent Handling -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Spendly - Track • Save • Grow" />
@@ -26,5 +31,48 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- UPI Intent Handling Script -->
+    <script>
+      // Enhanced UPI intent handling for better app redirection
+      window.addEventListener('beforeunload', function(e) {
+        // Allow UPI app redirects without confirmation
+        if (window.location.href.includes('upi://') || 
+            window.location.href.includes('phonepe://') ||
+            window.location.href.includes('tez://') ||
+            window.location.href.includes('paytmmp://') ||
+            window.location.href.includes('bhim://')) {
+          return;
+        }
+      });
+
+      // Handle page visibility changes for UPI app returns
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+          // User returned to the app - they might have completed payment
+          const pendingPayment = sessionStorage.getItem('pendingPayment');
+          if (pendingPayment) {
+            console.log('🔄 User returned from UPI app - payment may be completed');
+            // The React app will handle showing the confirmation dialog
+          }
+        }
+      });
+
+      // Detect if user is on mobile for better UPI handling
+      window.isMobileDevice = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
+      // Enhanced UPI app detection
+      window.detectUPIApps = function() {
+        const apps = {
+          phonepe: 'phonepe://',
+          googlepay: 'tez://',
+          paytm: 'paytmmp://',
+          bhim: 'bhim://',
+          generic: 'upi://'
+        };
+        
+        return apps;
+      };
+    </script>
   </body>
 </html>

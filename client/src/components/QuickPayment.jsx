@@ -42,35 +42,47 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
   const [toast, setToast] = useState(null)
   const [errors, setErrors] = useState({})
 
-  // Payment apps configuration
+  // Payment apps configuration with correct UPI schemes
   const paymentApps = [
     {
       id: 'phonepe',
       name: 'PhonePe',
       icon: '📱',
       color: 'from-purple-500 to-purple-600',
-      scheme: 'phonepe://'
+      scheme: 'phonepe://pay',
+      fallbackScheme: 'upi://pay'
     },
     {
       id: 'googlepay',
       name: 'Google Pay',
       icon: '💳',
       color: 'from-blue-500 to-blue-600',
-      scheme: 'tez://'
+      scheme: 'tez://upi/pay',
+      fallbackScheme: 'upi://pay'
     },
     {
       id: 'paytm',
       name: 'Paytm',
       icon: '💰',
       color: 'from-indigo-500 to-indigo-600',
-      scheme: 'paytmmp://'
+      scheme: 'paytmmp://pay',
+      fallbackScheme: 'upi://pay'
+    },
+    {
+      id: 'bhim',
+      name: 'BHIM UPI',
+      icon: '🏛️',
+      color: 'from-green-500 to-green-600',
+      scheme: 'bhim://pay',
+      fallbackScheme: 'upi://pay'
     },
     {
       id: 'generic',
       name: 'Other UPI Apps',
       icon: '🏦',
       color: 'from-gray-500 to-gray-600',
-      scheme: 'upi://'
+      scheme: 'upi://pay',
+      fallbackScheme: 'upi://pay'
     }
   ]
 
@@ -172,20 +184,52 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
     setShowQRScanner(false)
   }
 
-  const generateUPIUrl = (appScheme = 'upi://') => {
+  const generateUPIUrl = (app) => {
     const { amount, upiId, merchantName, categoryId } = formData
     const category = getCategoryById(categoryId) || 
       defaultCategories.find(c => c.id === categoryId)
     
-    const params = new URLSearchParams({
-      pa: upiId,
-      pn: merchantName || 'Merchant',
-      am: amount,
-      cu: 'INR',
-      tn: `Payment from ${category?.name || 'Spendly'}`
-    })
+    // Validate required fields
+    if (!upiId || !amount) {
+      throw new Error('Missing required payment details')
+    }
 
-    return `${appScheme}pay?${params.toString()}`
+    // Create UPI parameters
+    const upiParams = {
+      pa: upiId.trim(),
+      pn: (merchantName || 'Merchant').trim(),
+      am: parseFloat(amount).toFixed(2),
+      cu: 'INR',
+      tn: `Payment from ${category?.name || 'Spendly'} - ${merchantName || 'Payment'}`
+    }
+
+    // Generate URL based on app
+    let upiUrl
+    
+    if (app.id === 'phonepe') {
+      // PhonePe specific format
+      const params = new URLSearchParams(upiParams)
+      upiUrl = `${app.scheme}?${params.toString()}`
+    } else if (app.id === 'googlepay') {
+      // Google Pay specific format
+      const params = new URLSearchParams(upiParams)
+      upiUrl = `${app.scheme}?${params.toString()}`
+    } else if (app.id === 'paytm') {
+      // Paytm specific format
+      const params = new URLSearchParams(upiParams)
+      upiUrl = `${app.scheme}?${params.toString()}`
+    } else if (app.id === 'bhim') {
+      // BHIM UPI specific format
+      const params = new URLSearchParams(upiParams)
+      upiUrl = `${app.scheme}?${params.toString()}`
+    } else {
+      // Generic UPI format
+      const params = new URLSearchParams(upiParams)
+      upiUrl = `${app.scheme}?${params.toString()}`
+    }
+
+    console.log(`🔗 Generated UPI URL for ${app.name}:`, upiUrl)
+    return { primary: upiUrl, fallback: `${app.fallbackScheme}?${new URLSearchParams(upiParams).toString()}` }
   }
 
   const handlePayment = async () => {
@@ -200,9 +244,12 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
       setIsProcessing(true)
       setSelectedPaymentApp(app.id)
       
-      // Generate UPI URL with selected app scheme
-      const upiUrl = generateUPIUrl(app.scheme)
-      console.log(`🚀 Redirecting to ${app.name}:`, upiUrl)
+      console.log(`🚀 User selected ${app.name} for payment`)
+      
+      // Generate UPI URLs
+      const upiUrls = generateUPIUrl(app)
+      console.log(`🔗 Primary URL: ${upiUrls.primary}`)
+      console.log(`🔗 Fallback URL: ${upiUrls.fallback}`)
       
       // Store payment data for confirmation
       sessionStorage.setItem('pendingPayment', JSON.stringify({
@@ -211,21 +258,48 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
         timestamp: Date.now()
       }))
 
-      // Hide app selection and show confirmation
-      setShowPaymentApps(false)
-      setIsProcessing(false)
-      setShowConfirmation(true)
-
-      // Try to redirect to selected UPI app
-      try {
-        window.location.href = upiUrl
-      } catch (redirectError) {
-        console.log(`${app.name} redirect failed, continuing with manual confirmation`)
+      // Create a temporary link element for better redirect handling
+      const link = document.createElement('a')
+      link.href = upiUrls.primary
+      link.target = '_blank'
+      
+      // Try primary app-specific URL first
+      console.log(`📱 Attempting to open ${app.name}...`)
+      
+      // For mobile devices, try direct window.location first
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      
+      if (isMobile) {
+        // On mobile, try direct redirect
+        window.location.href = upiUrls.primary
+        
+        // Fallback after 3 seconds if app doesn't open
+        setTimeout(() => {
+          console.log(`⚠️ ${app.name} didn't open, trying fallback...`)
+          window.location.href = upiUrls.fallback
+        }, 3000)
+        
+      } else {
+        // On desktop, try opening in new tab/window
+        const newWindow = window.open(upiUrls.primary, '_blank')
+        
+        // If popup blocked or failed, try fallback
+        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+          console.log(`⚠️ Popup blocked, trying fallback for ${app.name}`)
+          window.location.href = upiUrls.fallback
+        }
       }
 
+      // Show confirmation dialog after attempting redirect
+      setTimeout(() => {
+        setShowPaymentApps(false)
+        setIsProcessing(false)
+        setShowConfirmation(true)
+      }, 1000)
+
     } catch (error) {
-      console.error('❌ Payment error:', error)
-      showToast('Failed to initiate payment', 'error')
+      console.error('❌ Payment app selection error:', error)
+      showToast(`Failed to open ${app.name}. ${error.message}`, 'error')
       setIsProcessing(false)
       setShowPaymentApps(false)
     }
@@ -427,9 +501,19 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
                 <div className="bg-secondary-100 dark:bg-secondary-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle className="h-8 w-8 text-secondary-600 dark:text-secondary-400" />
                 </div>
-                <h4 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                  Confirm Payment Status
+                <h4 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  Payment Status Confirmation
                 </h4>
+                
+                {/* Show selected payment app */}
+                {formData.paymentApp && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 mb-4">
+                    <p className="text-sm text-blue-700 dark:text-blue-300">
+                      📱 Opened in <strong>{formData.paymentApp}</strong>
+                    </p>
+                  </div>
+                )}
+                
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-4">
                   <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
                     <div className="flex justify-between">
@@ -444,17 +528,15 @@ function QuickPayment({ isOpen, onClose, preSelectedCategory }) {
                       <span>Category:</span>
                       <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedCategory?.name}</span>
                     </div>
-                    {formData.paymentApp && (
-                      <div className="flex justify-between">
-                        <span>Payment App:</span>
-                        <span className="font-semibold text-gray-900 dark:text-gray-100">{formData.paymentApp}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  Please confirm if the payment was completed successfully in your UPI app.
-                </p>
+                
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                    💡 <strong>Did the payment complete?</strong><br/>
+                    Check your {formData.paymentApp || 'UPI app'} for payment confirmation, then select the appropriate option below.
+                  </p>
+                </div>
               </div>
               
               <div className="space-y-3">
