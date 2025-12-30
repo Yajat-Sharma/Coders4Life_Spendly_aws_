@@ -7,9 +7,14 @@
 - [x] Environment templates created (.env.example)
 - [x] Deployment scripts created
 - [x] Documentation updated
+- [x] **OTP SMS integration with Twilio/AWS SNS**
+- [x] **Camera/QR scanner HTTPS compatibility**
+- [x] **Secure OTP handling with hashing**
+- [x] **Production error handling**
 - [ ] **Change JWT_SECRET in server/.env to a strong random string**
 - [ ] **Update CORS_ORIGIN in server/.env to your production domain**
 - [ ] **Set NODE_ENV=production in server/.env**
+- [ ] **Configure SMS provider (Twilio or AWS SNS)**
 
 ### Security
 - [ ] **Generate strong JWT secret**: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
@@ -65,6 +70,17 @@ PORT=5000
 JWT_SECRET=your-generated-strong-secret-here
 DB_PATH=./database.sqlite
 CORS_ORIGIN=https://your-frontend-domain.com
+
+# SMS Provider (REQUIRED - Choose one)
+# Option 1: Twilio
+TWILIO_ACCOUNT_SID=your-twilio-account-sid
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_PHONE_NUMBER=+1234567890
+
+# Option 2: AWS SNS
+# AWS_ACCESS_KEY_ID=your-aws-access-key
+# AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+# AWS_REGION=ap-south-1
 ```
 
 #### Frontend Environment Variables
@@ -77,11 +93,13 @@ VITE_API_URL=https://your-backend-domain.com
 ### Functionality Tests
 - [ ] **User Registration**: Test with phone number
 - [ ] **User Login**: Test with registered user
-- [ ] **Forgot Password**: Test OTP flow with phone number
+- [ ] **OTP SMS**: Test real SMS delivery to phone
+- [ ] **OTP Verification**: Test OTP verification flow
+- [ ] **Forgot Password**: Test complete password reset
 - [ ] **Category Creation**: Test budget categories
 - [ ] **Payment Flow**: Test payment app selection
 - [ ] **UPI Redirect**: Test on mobile device
-- [ ] **QR Scanner**: Test QR code scanning
+- [ ] **QR Scanner**: Test camera access on HTTPS
 - [ ] **Transaction History**: Test transaction tracking
 
 ### Mobile Testing

@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { getDatabase } = require('../database/init');
 
 const router = express.Router();
@@ -13,15 +14,84 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Send OTP (Mock implementation - replace with real SMS service)
+// Hash OTP for secure storage
+const hashOTP = (otp) => {
+  return crypto.createHash('sha256').update(otp).digest('hex');
+};
+
+// Real SMS service integration
 const sendSMS = async (phone, otp) => {
-  // In production, integrate with SMS service like Twilio, AWS SNS, etc.
-  console.log(`📱 SMS to ${phone}: Your Spendly OTP is ${otp}. Valid for 5 minutes.`);
+  const isProduction = process.env.NODE_ENV === 'production';
   
-  // Simulate SMS sending delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  return { success: true };
+  try {
+    if (isProduction && process.env.TWILIO_ACCOUNT_SID) {
+      // Production: Use Twilio
+      const twilio = require('twilio');
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      
+      const message = `Your Spendly OTP is ${otp}. Valid for 5 minutes. Do not share this code.`;
+      
+      console.log(`📱 Sending SMS to +91${phone} via Twilio...`);
+      
+      const result = await client.messages.create({
+        body: message,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: `+91${phone}`
+      });
+      
+      console.log(`✅ SMS sent successfully. SID: ${result.sid}`);
+      return { success: true, provider: 'twilio', sid: result.sid };
+      
+    } else if (isProduction && process.env.AWS_ACCESS_KEY_ID) {
+      // Production: Use AWS SNS
+      const AWS = require('aws-sdk');
+      const sns = new AWS.SNS({
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION || 'ap-south-1'
+      });
+      
+      const message = `Your Spendly OTP is ${otp}. Valid for 5 minutes. Do not share this code.`;
+      
+      console.log(`📱 Sending SMS to +91${phone} via AWS SNS...`);
+      
+      const params = {
+        Message: message,
+        PhoneNumber: `+91${phone}`,
+        MessageAttributes: {
+          'AWS.SNS.SMS.SenderID': {
+            DataType: 'String',
+            StringValue: 'SPENDLY'
+          },
+          'AWS.SNS.SMS.SMSType': {
+            DataType: 'String',
+            StringValue: 'Transactional'
+          }
+        }
+      };
+      
+      const result = await sns.publish(params).promise();
+      console.log(`✅ SMS sent successfully. MessageId: ${result.MessageId}`);
+      return { success: true, provider: 'aws-sns', messageId: result.MessageId };
+      
+    } else {
+      // Development or fallback: Console logging
+      console.log(`📱 [${isProduction ? 'PROD-FALLBACK' : 'DEV'}] SMS to +91${phone}: Your Spendly OTP is ${otp}. Valid for 5 minutes.`);
+      
+      if (isProduction) {
+        console.warn('⚠️  Production SMS not configured! Add TWILIO_* or AWS_* environment variables');
+        throw new Error('SMS service not configured for production');
+      }
+      
+      // Simulate SMS sending delay in development
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return { success: true, provider: 'console' };
+    }
+    
+  } catch (error) {
+    console.error('❌ SMS sending failed:', error.message);
+    throw error;
+  }
 };
 
 // Register
@@ -206,7 +276,16 @@ router.post('/send-otp', async (req, res) => {
     if (!phoneRegex.test(phone)) {
       return res.status(400).json({ 
         success: false,
-        error: 'Invalid phone number format'
+        error: 'Invalid phone number format. Please enter a valid 10-digit Indian mobile number.'
+      });
+    }
+
+    // Rate limiting: Check if OTP was sent recently
+    const existingOTP = otpStore.get(phone);
+    if (existingOTP && (Date.now() - (existingOTP.sentAt || 0)) < 60000) { // 1 minute cooldown
+      return res.status(429).json({ 
+        success: false,
+        error: 'Please wait 1 minute before requesting another OTP'
       });
     }
 
@@ -218,36 +297,68 @@ router.post('/send-otp', async (req, res) => {
         console.error('❌ Database error:', err);
         return res.status(500).json({ 
           success: false,
-          error: 'Database error'
+          error: 'Unable to process request. Please try again later.'
         });
       }
       
       if (!user) {
+        console.log(`❌ OTP request for unregistered phone: ${phone}`);
         return res.status(404).json({ 
           success: false,
-          error: 'Phone number not registered'
+          error: 'Phone number not registered. Please register first.'
         });
       }
 
       // Generate OTP
       const otp = generateOTP();
+      const hashedOTP = hashOTP(otp);
       const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+      const sentAt = Date.now();
       
-      // Store OTP
+      console.log(`📱 Generating OTP for phone: ${phone} (User ID: ${user.id})`);
+      
+      // Store hashed OTP securely
       otpStore.set(phone, {
-        otp,
+        hashedOTP,
         expiresAt,
+        sentAt,
         attempts: 0,
-        verified: false
+        verified: false,
+        userId: user.id
       });
 
       try {
         // Send SMS
-        await sendSMS(phone, otp);
+        const smsResult = await sendSMS(phone, otp);
         
-        console.log(`✅ OTP sent to ${phone}`);
+        console.log(`✅ OTP sent to ${phone} via ${smsResult.provider}`);
+        
         res.json({
           success: true,
+          message: 'OTP sent successfully to your mobile number',
+          provider: smsResult.provider !== 'console' ? 'sms' : 'console'
+        });
+        
+      } catch (smsError) {
+        console.error('❌ SMS sending failed:', smsError.message);
+        
+        // Remove OTP from store if SMS failed
+        otpStore.delete(phone);
+        
+        res.status(500).json({ 
+          success: false,
+          error: 'Unable to send OTP. Please check your phone number and try again later.'
+        });
+      }
+    });
+  } catch (error) {
+    console.error('❌ Send OTP error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Unable to send OTP. Please try again later.'
+    });
+  }
+});
           message: 'OTP sent successfully'
         });
       } catch (smsError) {
@@ -279,55 +390,71 @@ router.post('/verify-otp', (req, res) => {
       });
     }
 
+    // Validate OTP format
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'OTP must be a 6-digit number'
+      });
+    }
+
     const otpData = otpStore.get(phone);
     
     if (!otpData) {
+      console.log(`❌ OTP verification failed: No OTP found for phone ${phone}`);
       return res.status(400).json({ 
         success: false,
-        error: 'OTP not found or expired'
+        error: 'OTP not found or expired. Please request a new OTP.'
       });
     }
 
     // Check if OTP is expired
     if (Date.now() > otpData.expiresAt) {
+      console.log(`❌ OTP verification failed: Expired OTP for phone ${phone}`);
       otpStore.delete(phone);
       return res.status(400).json({ 
         success: false,
-        error: 'OTP has expired'
+        error: 'OTP has expired. Please request a new OTP.'
       });
     }
 
     // Check attempts (prevent brute force)
     if (otpData.attempts >= 3) {
+      console.log(`❌ OTP verification failed: Too many attempts for phone ${phone}`);
       otpStore.delete(phone);
       return res.status(400).json({ 
         success: false,
-        error: 'Too many failed attempts'
+        error: 'Too many failed attempts. Please request a new OTP.'
       });
     }
 
-    // Verify OTP
-    if (otpData.otp !== otp) {
+    // Verify OTP using hash comparison
+    const hashedInputOTP = hashOTP(otp);
+    if (otpData.hashedOTP !== hashedInputOTP) {
       otpData.attempts += 1;
+      console.log(`❌ OTP verification failed: Invalid OTP for phone ${phone} (Attempt ${otpData.attempts}/3)`);
       return res.status(400).json({ 
         success: false,
-        error: 'Invalid OTP'
+        error: `Invalid OTP. ${3 - otpData.attempts} attempts remaining.`
       });
     }
 
-    // Mark as verified
+    // Mark as verified (one-time use)
     otpData.verified = true;
+    otpData.verifiedAt = Date.now();
     
-    console.log(`✅ OTP verified for ${phone}`);
+    console.log(`✅ OTP verified successfully for phone ${phone} (User ID: ${otpData.userId})`);
+    
     res.json({
       success: true,
       message: 'OTP verified successfully'
     });
+    
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
     res.status(500).json({ 
       success: false,
-      error: 'Internal server error'
+      error: 'Unable to verify OTP. Please try again later.'
     });
   }
 });
@@ -355,9 +482,20 @@ router.post('/reset-password', async (req, res) => {
     const otpData = otpStore.get(phone);
     
     if (!otpData || !otpData.verified) {
+      console.log(`❌ Password reset failed: OTP not verified for phone ${phone}`);
       return res.status(400).json({ 
         success: false,
-        error: 'OTP verification required'
+        error: 'OTP verification required. Please verify OTP first.'
+      });
+    }
+
+    // Check if OTP was used recently (prevent replay attacks)
+    if (otpData.verifiedAt && (Date.now() - otpData.verifiedAt) > 10 * 60 * 1000) { // 10 minutes
+      console.log(`❌ Password reset failed: OTP verification expired for phone ${phone}`);
+      otpStore.delete(phone);
+      return res.status(400).json({ 
+        success: false,
+        error: 'OTP verification expired. Please request a new OTP.'
       });
     }
 

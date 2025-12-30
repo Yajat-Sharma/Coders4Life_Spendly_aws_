@@ -13,6 +13,11 @@ node_modules/
 *.sqlite
 *.db
 
+# Test files (cleaned up)
+test_*.html
+*_test.html
+*.test.html
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
