@@ -30,12 +30,12 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:3000',
-      process.env.CORS_ORIGIN
-    ].filter(Boolean); // Remove undefined values
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+  'https://coders4-life-spendly-aws.vercel.app'
+];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
